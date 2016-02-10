@@ -11,7 +11,7 @@ type Source alpha = Stream alpha -- a source of data
 type EventFilter alpha = alpha -> Bool                                     -- the type of the user-supplied function
 
 streamFilter:: EventFilter alpha -> Stream alpha -> Stream alpha           -- if the value in the event meets the criteria then it can pass through
-streamFilter ff []                      = []                               
+streamFilter ff []                      = []
 streamFilter ff (e@(E t v):r) | ff v      = e      : streamFilter ff r
                               | otherwise = (T t  ): streamFilter ff r     -- always allow timestamps to pass through for use in time-based windowing
 streamFilter ff (e@(V   v):r) | ff v      = e      : streamFilter ff r
@@ -42,16 +42,16 @@ makeWindows fwm s = map (\win->if   timedEvent (head win)    -- package the wind
 
 processWindows:: WindowAggregator alpha beta -> Stream (Stream alpha) -> Stream beta
 processWindows fwa wins = map (\win->let agg = fwa $ getVals $ value win in -- the aggregation function acts only on values in events
-                                        if   timedEvent win 
+                                        if   timedEvent win
                                         then E (time win) agg
                                         else V            agg) wins
-            
+
 getVals:: Stream alpha -> [alpha]
-getVals s = map value $ filter dataEvent s 
+getVals s = map value $ filter dataEvent s
 
 splitAtValuedEvents:: Int -> Stream alpha -> (Bool,Stream alpha,Stream alpha)
 splitAtValuedEvents length s = splitAtValuedEvents' length [] s
-   
+
 splitAtValuedEvents':: Int -> Stream alpha -> Stream alpha -> (Bool,Stream alpha,Stream alpha)
 splitAtValuedEvents' 0      acc s                     = (True ,acc, s)
 splitAtValuedEvents' length acc []                    = (False,[] ,[])
@@ -59,7 +59,7 @@ splitAtValuedEvents' length acc (h:t) | dataEvent h = splitAtValuedEvents' (leng
                                       | otherwise   = splitAtValuedEvents' length     acc        t
 
 -- Examples of WindowMaker functions
--- A sliding window of specified length : a new window is created for every event received 
+-- A sliding window of specified length : a new window is created for every event received
 sliding:: Int -> WindowMaker alpha
 sliding wLength s = let (validWindow,fstWindow,rest) = splitAtValuedEvents wLength s in -- ignores events with no value
                         if   validWindow
@@ -113,7 +113,7 @@ slidingTime' tLength buffer s@(h:t) = let (newEvents ,rest) = span (\e->time e==
 
 timeTake:: UTCTime -> Stream alpha -> (Stream alpha,Stream alpha)
 timeTake endTime s = span (\h->(time h)<=endTime) s
- 
+
 chop:: Int -> WindowMaker alpha
 chop wLength s = let (validWindow,fstWindow,rest) = splitAtValuedEvents wLength s in -- remove events with no value
                      if   validWindow
@@ -138,10 +138,10 @@ mergeStreams (x:xs) = merge' x (mergeStreams xs)
 merge':: Stream alpha -> Stream alpha -> Stream alpha
 merge' xs         []                                          = xs
 merge' []         ys                                          = ys
-merge' s1@(e1:xs) s2@(e2:ys) | timedEvent e1 && timedEvent e2 = if   time e1 < time e2 
+merge' s1@(e1:xs) s2@(e2:ys) | timedEvent e1 && timedEvent e2 = if   time e1 < time e2
                                                                 then e1: merge' s2 xs
                                                                 else e2: merge' ys s1
-                             | otherwise                      = e1: merge' s2 xs  -- arbitrary ordering if 1 or 2 of the events aren't timed                                              
+                             | otherwise                      = e1: merge' s2 xs  -- arbitrary ordering if 1 or 2 of the events aren't timed
                                                                                   -- swap order of streams so as to interleave
 
 -- Join 2 streams of different types by combining windows
@@ -149,15 +149,20 @@ type JoinFilter alpha beta        = alpha -> beta -> Bool
 type JoinMap    alpha beta gamma  = alpha -> beta -> gamma
 
 joinStreamsE:: Stream alpha -> WindowMaker alpha ->
-               Stream beta  -> WindowMaker beta -> 
+               Stream beta  -> WindowMaker beta ->
                JoinFilter alpha beta -> JoinMap alpha beta gamma -> Stream gamma
 joinStreamsE s1 fwm1 s2 fwm2 fwj fwm = joinWindowsE fwj fwm $ combineStreamWindows s1 fwm1 s2 fwm2
 
 processJoinPair:: JoinFilter alpha beta -> JoinMap alpha beta gamma -> Event (Stream alpha,Stream beta) -> Stream gamma
 processJoinPair jf jm (E t (w1,w2)) = let eventPairs = cartesianProduct (filter dataEvent w1) (filter dataEvent w2) in
                                       let events     = map (\(e1,e2)-> V (value e1,value e2)) eventPairs in
-                                          map (\(V (v1,v2))-> V (jm v1 v2)) 
+                                          map (\(V (v1,v2))-> V (jm v1 v2))
                                           $ filter (\(V (v1,v2)) -> jf v1 v2) events
+processJoinPair jf jm (V  (w1,w2)) = let eventPairs = cartesianProduct (filter dataEvent w1) (filter dataEvent w2) in
+                                     let events     = map (\(e1,e2)-> V (value e1,value e2)) eventPairs in
+                                         map (\(V (v1,v2))-> V (jm v1 v2))
+                                         $ filter (\(V (v1,v2)) -> jf v1 v2) events
+
 
 cartesianProduct:: [alpha] -> [beta] -> [(alpha,beta)]
 cartesianProduct s1 s2 = [(a,b)|a<-s1,b<-s2]
@@ -166,7 +171,7 @@ joinWindowsE:: JoinFilter alpha beta -> JoinMap alpha beta gamma -> Stream (Stre
 joinWindowsE fwj fwm s = concatMap (processJoinPair fwj fwm) s
 
 joinStreamsW:: Stream alpha -> WindowMaker alpha ->
-               Stream beta  -> WindowMaker beta  -> 
+               Stream beta  -> WindowMaker beta  ->
                ([alpha] -> [beta] -> gamma)      -> Stream gamma
 joinStreamsW s1 fwm1 s2 fwm2 fwj =  joinWindowsW fwj $ combineStreamWindows s1 fwm1 s2 fwm2
 
@@ -182,8 +187,8 @@ joinWindowsW fwm s = map (\(V (w1,w2)) -> V (fwm (getVals w1) (getVals w2))) s
 streamFilterAcc:: beta -> (alpha -> beta -> beta) -> (alpha -> beta -> Bool) -> Stream alpha -> Stream alpha
 streamFilterAcc acc accfn filterfn []           = []
 streamFilterAcc acc accfn filterfn ((T t):rest) =         streamFilterAcc acc    accfn filterfn rest
-streamFilterAcc acc accfn filterfn (e    :rest) = let  newAcc = accfn (value e) acc in 
-                                                  if   filterfn (value e) acc 
+streamFilterAcc acc accfn filterfn (e    :rest) = let  newAcc = accfn (value e) acc in
+                                                  if   filterfn (value e) acc
                                                   then e:(streamFilterAcc newAcc accfn filterfn rest)
                                                   else   (streamFilterAcc newAcc accfn filterfn rest)
 
@@ -213,7 +218,7 @@ t1:: Int -> Int -> Stream alpha -> (Bool,Stream alpha,Stream alpha)
 t1 tLen sLen s = splitAtValuedEvents tLen (take sLen s)
 
 s1:: Stream Int
-s1 = [(E (addUTCTime i (read "2013-01-01 00:00:00")) 999)|i<-[0..]]
+s1 = [(E (addUTCTime i (read "2013-01-01 00:00:00")) 999)|i<-[0..1]]
 
 s2:: Stream Int
 s2 = [T (addUTCTime i (read "2013-01-01 00:00:00")) |i<-[0..]]
@@ -238,4 +243,3 @@ ex4 i = makeWindows (chop i) s4
 ex5 = streamFilter (\v->v>1000) s1
 
 ex6 = streamFilter (\v->v<1000) s1
-
